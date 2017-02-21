@@ -1,3 +1,4 @@
+from __future__ import print_function
 import zmq
 import time
 import random
@@ -19,8 +20,10 @@ pub_socket.bind("tcp://*:%s" % port)
 while True:
 	topic = 'test'
 	messageData = np.random.rand(2)
-	messageData = random.randrange(1,215)
-	pub_socket.send_string('%s %d' % (topic, messageData))
-	time.sleep(1)
+	messageData = random.randrange(1,500)
+	msgString = '%s %d' % (topic, messageData)
+	print('sent %s' % msgString)
+	pub_socket.send_string(msgString)
+	time.sleep(.5)
 
 
