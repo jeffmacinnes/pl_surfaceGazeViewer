@@ -1,5 +1,6 @@
 import sys
 import zmq
+import msgpack as serializer
 
 port = '42000'
 IP = '127.0.0.1'
@@ -16,6 +17,9 @@ except TypeError:
 	sub_socket.setsockopt_string(zmq.SUBSCRIBE, 'test')
 
 while True:
-	msg = sub_socket.recv_string()
-	print(msg)
+	topic = sub_socket.recv_string()
+	payload = serializer.loads(sub_socket.recv(), encoding='utf-8')
+	#msg = sub_socket.recv_string()
+	print('topic is:' + topic)
+	print(payload)
 
