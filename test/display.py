@@ -10,13 +10,13 @@ from multiprocessing import Process, Array, Value
 import time
 
 
-def dataReceiver(nPts, xPts, yPts):
+def dataReceiver(host, port, nPts, xPts, yPts):
 	"""
 	receive data over socket, store in arr
 	"""
 	# set up socket
-	host = '127.0.0.1'
-	port = '42000'
+	# host = '127.0.0.1'
+	# port = '42000'
 	context = zmq.Context()
 	sub_socket = context.socket(zmq.SUB)
 	sub_socket.connect('tcp://%s:%s' % (host, port))
@@ -38,6 +38,11 @@ def dataReceiver(nPts, xPts, yPts):
 		nPts.value += 1
 
 
+# Network Settings
+host = '127.0.0.1'
+host = '10.188.90.175'
+port = '42000'
+
 ### Screen settings
 pygame.init()
 size = 650, 650
@@ -55,7 +60,7 @@ if __name__ == '__main__':
 	nPts = Value('i', 0)
 	
 	# start socket listening process in the background
-	p = Process(target=dataReceiver, args=(nPts, xPts, yPts))
+	p = Process(target=dataReceiver, args=(host, port, nPts, xPts, yPts))
 	p.daemon = True
 	p.start()
 
