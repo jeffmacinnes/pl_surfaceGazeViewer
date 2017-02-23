@@ -30,10 +30,9 @@ def dataReceiver(nPts, xPts, yPts):
 	while True:
 		topic = sub_socket.recv_string()
 		payload = serializer.loads(sub_socket.recv(), encoding='utf-8')
-		print('received:' + topic + ' message')
+		#print('received:' + topic + ' message')
 
 		thisGaze = payload['gaze']
-		print(thisGaze[0])
 		xPts[nPts.value] = thisGaze[0]
 		yPts[nPts.value] = thisGaze[1]
 		nPts.value += 1
@@ -47,7 +46,7 @@ bgImg = pygame.image.load("startImage.jpg")
 
 dotColor = (254,91,161)
 lineColor = (170, 238, 180)
-nTrace = 60
+showBG = True
 
 if __name__ == '__main__':
 	# shared vars across processes
@@ -60,32 +59,72 @@ if __name__ == '__main__':
 	p.daemon = True
 	p.start()
 
-	while True:
+	running = True
+	while running:
 		### set up screen elements
-		# bg image
-		screen.blit(bgImg, (0,0))
+		if showBG:
+			# bg image
+			screen.blit(bgImg, (0,0))
+		else:
+			screen.fill((0, 0, 0))
 
-		if nPts.value > nTrace:
-			# draw gaze lines
-			for i in range(1, nTrace):
-				prevIdx = i-1
-				x1 = int(xPts[nPts.value-prevIdx - 1] * size[0])
-				y1 = int(yPts[nPts.value-prevIdx - 1] * size[1])
-				x2 = int(xPts[nPts.value-i -1] * size[0])
-				y2 = int(yPts[nPts.value-i -1] * size[1])
-				alpha = 255 - (i * (255/nTrace))
-				thisLineColor = lineColor + (alpha,)
+		# grab the indices for relevant datapoints
+		startPt_idx = nPts.value - 60
+		lastPt_idx = nPts.value-1
+		pt_indices = np.arange(startPt_idx, lastPt_idx+1)
+		pt_indices = pt_indices[pt_indices >= 0] 		# remove negative indices (possible in beginning if startPt_idx is nPts-[something] )
 
-				pygame.gfxdraw.line(screen, x1, y1, x2, y2, thisLineColor)
+		# make sure there's at least 2 points to draw (for the sake of a line)
+		if len(pt_indices) >= 2:
+			# loop through all pts
+			for i, ptIdx in enumerate(pt_indices):
+				
+				### LINES
+				# if it's the first point in the indices, can't draw a line yet
+				if i == 0:
+					prev_ptIdx = ptIdx
+				else:
+					# set up line coords
+					x1 = int(xPts[prev_ptIdx] * size[0])
+					y1 = int(yPts[prev_ptIdx] * size[1])
+					x2 = int(xPts[ptIdx] * size[0])
+					y2 = int(yPts[ptIdx] * size[1])
+
+					alpha = (i * 255/len(pt_indices))
+					thisLineColor = lineColor + (alpha,)
+
+					pygame.gfxdraw.line(screen, x1, y1, x2, y2, thisLineColor)
+
+					# update the prevPt idx
+					prev_ptIdx = ptIdx
 
 
-			# draw gaze dots
-			for i in range(1, nTrace):
-				circleX = int(xPts[nPts.value - i - 1] * size[0])
-				circleY = int(yPts[nPts.value - i - 1] * size[1])
-				alpha = 255 - (i * (255/nTrace))
+				### CIRCLES
+				cx = int(xPts[ptIdx] * size[0])
+				cy = int(yPts[ptIdx] * size[1])
+				alpha = (i * 255/len(pt_indices))
 				thisDotColor = dotColor + (alpha,)
-				pygame.gfxdraw.filled_circle(screen, circleX, circleY, 10, thisDotColor)
+				if ptIdx == pt_indices.max():
+					r = 12
+				else:
+					r = 6
+				pygame.gfxdraw.filled_circle(screen, cx, cy, r, thisDotColor)
 
 		pygame.display.flip()
 		print(nPts.value)
+
+		# listen for commands/events
+		for event in pygame.event.get():
+			if event.type == pygame.QUIT:
+				running = False
+				pygame.quit()
+				sys.exit()
+
+			# keyboard commands
+			if event.type == pygame.KEYDOWN:
+				if event.key == pygame.K_s:
+					if showBG:
+						showBG = False
+					else:
+						showBG = True
+
