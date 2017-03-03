@@ -8,6 +8,7 @@ import pygame
 import pygame.gfxdraw
 import sys
 import zmq
+import cv2
 import numpy as np 
 import msgpack as serializer
 from multiprocessing import Process, Array, Value
@@ -41,10 +42,10 @@ def dataReceiver(host, port, nPts, xPts, yPts):
 	while True:
 		topic, msg = sub_socket.recv_multipart()
 		message = serializer.loads(msg)
-		
+
 		try:
 			for gaze in message[b'gaze_on_srf']:
-				print(gaze[b'norm_pos'])
+				#print(gaze[b'norm_pos'])
 				xPts[nPts.value] = gaze[b'norm_pos'][0]
 				yPts[nPts.value] = 1 - gaze[b'norm_pos'][1]		# invert (incoming coords have origin bottom left)
 				nPts.value += 1
@@ -52,22 +53,86 @@ def dataReceiver(host, port, nPts, xPts, yPts):
 			pass
 
 
+
+def createHeatmap(xArr, yArr, xOffset, yOffset):
+	"""
+	create a heatmap based on the supplied x & y pts
+	return a numpy array that can be converted to a surface and shown on the screen
+	"""
+	
+	# calculate the number of bins in each direction
+	aspect_ratio = h/w
+	bins_w = 25
+	bins_h = int(bins_w * aspect_ratio)
+
+	# convert the x/y data to be percentages of the bin ranges
+	xArr = (xArr * bins_w)
+	yArr = (yArr * bins_h)
+
+	# add in any manual x/y offset. 
+	# this offset is currenly a function of screen w/h, needs to be bins w/h
+	xOffset_bins = (xOffset/w) * bins_w
+	yOffset_bins = (yOffset/h) * bins_h
+	xArr = xArr + xOffset_bins
+	yArr = yArr + yOffset_bins
+
+	# make 2d histogram
+	hist, xedges, yedges = np.histogram2d(xArr, yArr, 
+								bins=(bins_w, bins_h),
+								range=[[0,bins_w], [0, bins_h]],
+								normed=False)
+
+
+	# smooth the histogram
+	hm_detail = .5
+	filter_size = int(int(hm_detail * bins_w)/2)*2 + 1
+	std_dev = int(filter_size/6.)
+	hist = cv2.GaussianBlur(hist, (filter_size, filter_size), std_dev)
+
+	# normalize to 0-255
+	maxval = np.amax(hist)
+	scale = 255./maxval
+	hist = np.uint8(hist*(scale))
+
+	# apply cv2 colormap to the histogram
+	c_map = cv2.applyColorMap(hist, cv2.COLORMAP_SUMMER)
+
+	# resize to match the full width and height of the image
+	c_map = cv2.resize(c_map, (h,w))
+
+	# create the np array that will store the heatmap
+	heatmap = np.ones((w,h,4), dtype=np.uint8)
+	heatmap[:,:,:3] = c_map
+	heatmap[:,:, 3] = 120  # set transparency
+
+	return heatmap
+
+
 # Network Settings
 host = '127.0.0.1'
 #host = '10.188.90.175'
 port = '50020'
 
-# pygame setup
+#### pygame setup #######################
 pygame.init()
 bgImg = pygame.image.load("refImgs/histBook.jpg")
 w = bgImg.get_width()
 h = bgImg.get_height()
 size = w,h
-screen = pygame.display.set_mode(size)
+
+pygame.display.list_modes()
+info = pygame.display.Info()
+screen = pygame.display.set_mode(size)	# window
+#screen = pygame.display.set_mode(size, pygame.FULLSCREEN) 	# full screen
 
 dotColor = (254,91,161)
 lineColor = (170, 238, 180)
-showBG = True
+showBG = True		# background image toggle
+showHM = True		# heatmap toggle
+
+### gaze settings
+xOffset = 0
+yOffset = 0
 
 if __name__ == '__main__':
 
@@ -92,10 +157,29 @@ if __name__ == '__main__':
 			screen.fill((0, 0, 0))
 
 		# grab the indices for relevant datapoints
-		startPt_idx = nPts.value - 300
+		startPt_idx = nPts.value - 300   # set the range for how many pts you want to use
+		if startPt_idx < 0: startPt_idx = 0
 		lastPt_idx = nPts.value-1
 		pt_indices = np.arange(startPt_idx, lastPt_idx+1)
-		pt_indices = pt_indices[pt_indices >= 0] 		# remove negative indices (possible in beginning if startPt_idx is nPts-[something] )
+
+		# create heatmap, if necessary
+		if showHM:
+			if nPts.value > 5:
+				# create numpy arrays from ctype Arrays xPts and yPts
+				xArr = np.array(xPts[0:lastPt_idx])
+				yArr = np.array(yPts[0:lastPt_idx])
+
+				hm_array = createHeatmap(xArr, yArr, xOffset, yOffset)
+
+				#print(hm_array.shape)
+
+				# turn into a pygame surface and display
+				#hm_surf = pygame.surfarray.make_surface(hm_array[:,:,:3])
+				hm_surf = pygame.Surface((w,h), pygame.SRCALPHA)
+				#pygame.pixelcopy.array_to_surface(hm_surf, hm_array)
+				hm_surf.set_alpha(175)
+				screen.blit(hm_surf, (0,0))
+
 
 		# make sure there's at least 2 points to draw (for the sake of a line)
 		if len(pt_indices) >= 2:
@@ -108,10 +192,10 @@ if __name__ == '__main__':
 					prev_ptIdx = ptIdx
 				else:
 					# set up line coords
-					x1 = int(xPts[prev_ptIdx] * size[0])
-					y1 = int(yPts[prev_ptIdx] * size[1])
-					x2 = int(xPts[ptIdx] * size[0])
-					y2 = int(yPts[ptIdx] * size[1])
+					x1 = int(xPts[prev_ptIdx] * size[0]) + xOffset
+					y1 = int(yPts[prev_ptIdx] * size[1]) + yOffset
+					x2 = int(xPts[ptIdx] * size[0]) + xOffset
+					y2 = int(yPts[ptIdx] * size[1]) + yOffset
 
 					alpha = (i * 255/len(pt_indices))
 					thisLineColor = lineColor + (alpha,)
@@ -123,8 +207,8 @@ if __name__ == '__main__':
 
 
 				### CIRCLES
-				cx = int(xPts[ptIdx] * size[0])
-				cy = int(yPts[ptIdx] * size[1])
+				cx = int(xPts[ptIdx] * size[0]) + xOffset
+				cy = int(yPts[ptIdx] * size[1]) + yOffset
 				alpha = (i * 255/len(pt_indices))
 				thisDotColor = dotColor + (alpha,)
 				if ptIdx == pt_indices.max():
@@ -145,8 +229,37 @@ if __name__ == '__main__':
 
 			# keyboard commands
 			if event.type == pygame.KEYDOWN:
-				if event.key == pygame.K_s:
+				# toggle bg on/off with b key
+				if event.key == pygame.K_b:
 					if showBG:
 						showBG = False
 					else:
 						showBG = True
+
+				# toggle hm on/off
+				if event.key == pygame.K_h:
+					if showHM:
+						showHM = False
+					else:
+						showHM = True
+
+				# manual calibration with arrow keys
+				if event.key == pygame.K_UP:
+					yOffset -= 5
+				elif event.key == pygame.K_DOWN:
+					yOffset += 5
+				elif event.key == pygame.K_RIGHT:
+					xOffset += 5
+				elif event.key == pygame.K_LEFT:
+					xOffset -= 5
+
+				# quit
+				if event.key == pygame.K_q:
+					running = False
+					pygame.quit()
+					sys.exist()
+
+
+
+
+
