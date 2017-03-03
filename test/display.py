@@ -74,7 +74,7 @@ if __name__ == '__main__':
 			screen.fill((0, 0, 0))
 
 		# grab the indices for relevant datapoints
-		startPt_idx = nPts.value - 60
+		startPt_idx = nPts.value - 300
 		lastPt_idx = nPts.value-1
 		pt_indices = np.arange(startPt_idx, lastPt_idx+1)
 		pt_indices = pt_indices[pt_indices >= 0] 		# remove negative indices (possible in beginning if startPt_idx is nPts-[something] )

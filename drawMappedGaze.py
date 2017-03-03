@@ -41,7 +41,7 @@ def dataReceiver(host, port, nPts, xPts, yPts):
 	while True:
 		topic, msg = sub_socket.recv_multipart()
 		message = serializer.loads(msg)
-
+		
 		try:
 			for gaze in message[b'gaze_on_srf']:
 				print(gaze[b'norm_pos'])
@@ -54,7 +54,7 @@ def dataReceiver(host, port, nPts, xPts, yPts):
 
 # Network Settings
 host = '127.0.0.1'
-host = '10.188.90.175'
+#host = '10.188.90.175'
 port = '50020'
 
 # pygame setup
@@ -92,7 +92,7 @@ if __name__ == '__main__':
 			screen.fill((0, 0, 0))
 
 		# grab the indices for relevant datapoints
-		startPt_idx = nPts.value - 120
+		startPt_idx = nPts.value - 300
 		lastPt_idx = nPts.value-1
 		pt_indices = np.arange(startPt_idx, lastPt_idx+1)
 		pt_indices = pt_indices[pt_indices >= 0] 		# remove negative indices (possible in beginning if startPt_idx is nPts-[something] )
