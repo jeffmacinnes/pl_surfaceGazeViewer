@@ -1,6 +1,16 @@
 """
 Received streamed gaze coords. Gaze coords are normalized and mapped relative to the reference image. 
 This script will overlay the gaze coords on top of the reference image
+
+keyboard controls:
+	- b: toggle background on/off
+	- g: toggle gaze pts on/off
+	- h: toggle heatmap on/off
+	- r: reset all data pts
+	- t: show ALL gaze pts, vs. trace (showGaze must be true, g-key)
+
+	- [arrow keys]: manually adjust gaze pts location 
+
 """
 from __future__ import print_function
 from __future__ import division
@@ -94,18 +104,28 @@ def createHeatmap(xArr, yArr, xOffset, yOffset):
 	scale = 255./maxval
 	hist = np.uint8(hist*(scale))
 
+	# threshold histogram
+	hist[hist < 55] = 0
+
 	# apply cv2 colormap to the histogram
-	c_map = cv2.applyColorMap(hist, cv2.COLORMAP_SUMMER)
+	c_map = cv2.applyColorMap(hist, cv2.COLORMAP_COOL)
 
 	# resize to match the full width and height of the image
 	c_map = cv2.resize(c_map, (h,w))
+
+	# convert the color to RGB from BGR
+	c_map = cv2.cvtColor(c_map, cv2.COLOR_BGR2RGB)
 
 	# create the np array that will store the heatmap
 	heatmap = np.ones((w,h,4), dtype=np.uint8)
 	heatmap[:,:,:3] = c_map
 	heatmap[:,:, 3] = 120  # set transparency
 
-	return heatmap
+	# get the color of the lowest values (in order to make transparent)
+	zeroIdx = np.where(hist == 0)
+	zeroColor = heatmap[zeroIdx[0][0], zeroIdx[1][0], :3].astype(int)
+
+	return heatmap, zeroColor
 
 
 # Network Settings
@@ -115,7 +135,7 @@ port = '50020'
 
 #### pygame setup #######################
 pygame.init()
-bgImg = pygame.image.load("refImgs/histBook.jpg")
+bgImg = pygame.image.load("refImgs/testSkull.jpg")
 w = bgImg.get_width()
 h = bgImg.get_height()
 size = w,h
@@ -126,9 +146,13 @@ screen = pygame.display.set_mode(size)	# window
 #screen = pygame.display.set_mode(size, pygame.FULLSCREEN) 	# full screen
 
 dotColor = (254,91,161)
-lineColor = (170, 238, 180)
+lineColor = (0, 0, 0)
+
 showBG = True		# background image toggle
-showHM = True		# heatmap toggle
+showGaze = True		# gaze pts toggle
+showHM = False		# heatmap toggle
+allGaze = False		# show all gaze toggle (vs. gaze trace)
+gazeTrace = 10 	# number of pts in gaze trace
 
 ### gaze settings
 xOffset = 0
@@ -157,65 +181,89 @@ if __name__ == '__main__':
 			screen.fill((0, 0, 0))
 
 		# grab the indices for relevant datapoints
-		startPt_idx = nPts.value - 300   # set the range for how many pts you want to use
+		if allGaze:
+			startPt_idx = 0
+		else:
+			startPt_idx = nPts.value - gazeTrace   # set the range for how many pts you want to use
 		if startPt_idx < 0: startPt_idx = 0
 		lastPt_idx = nPts.value-1
 		pt_indices = np.arange(startPt_idx, lastPt_idx+1)
 
-		# create heatmap, if necessary
+		### create/show heatmap
 		if showHM:
 			if nPts.value > 5:
 				# create numpy arrays from ctype Arrays xPts and yPts
 				xArr = np.array(xPts[0:lastPt_idx])
 				yArr = np.array(yPts[0:lastPt_idx])
 
-				hm_array = createHeatmap(xArr, yArr, xOffset, yOffset)
+				# create heatmap array
+				try:
+					hm_array, low_color = createHeatmap(xArr, yArr, xOffset, yOffset)
+					keyColor = pygame.Color(low_color[0], low_color[1], low_color[2], int(255))
 
-				#print(hm_array.shape)
+					# turn into a pygame surface and display
+					hm_surf = pygame.surfarray.make_surface(hm_array[:,:,:3])
+					hm_surf.set_colorkey(keyColor)
+					hm_surf.set_alpha(205)
+					screen.blit(hm_surf, (0,0))
+				except:
+					pass
 
-				# turn into a pygame surface and display
-				#hm_surf = pygame.surfarray.make_surface(hm_array[:,:,:3])
-				hm_surf = pygame.Surface((w,h), pygame.SRCALPHA)
-				#pygame.pixelcopy.array_to_surface(hm_surf, hm_array)
-				hm_surf.set_alpha(175)
-				screen.blit(hm_surf, (0,0))
-
-
+		### show GazePts
+		if showGaze:
 		# make sure there's at least 2 points to draw (for the sake of a line)
-		if len(pt_indices) >= 2:
-			# loop through all pts
-			for i, ptIdx in enumerate(pt_indices):
-				
-				### LINES
-				# if it's the first point in the indices, can't draw a line yet
-				if i == 0:
-					prev_ptIdx = ptIdx
-				else:
-					# set up line coords
-					x1 = int(xPts[prev_ptIdx] * size[0]) + xOffset
-					y1 = int(yPts[prev_ptIdx] * size[1]) + yOffset
-					x2 = int(xPts[ptIdx] * size[0]) + xOffset
-					y2 = int(yPts[ptIdx] * size[1]) + yOffset
+			if len(pt_indices) >= 2:
+				# loop through all pts
+				for i, ptIdx in enumerate(pt_indices):
+					
+					### LINES
+					# if it's the first point in the indices, can't draw a line yet
+					if i == 0:
+						prev_ptIdx = ptIdx
+					else:
+						# set up line coords
+						x1 = int(xPts[prev_ptIdx] * size[0]) + xOffset
+						y1 = int(yPts[prev_ptIdx] * size[1]) + yOffset
+						x2 = int(xPts[ptIdx] * size[0]) + xOffset
+						y2 = int(yPts[ptIdx] * size[1]) + yOffset
 
-					alpha = (i * 255/len(pt_indices))
-					thisLineColor = lineColor + (alpha,)
+						if allGaze:
+							thisLineColor = lineColor
+						else:
+							alpha = (i * 255/len(pt_indices))
+							thisLineColor = lineColor + (alpha,)
 
-					pygame.gfxdraw.line(screen, x1, y1, x2, y2, thisLineColor)
+						pygame.draw.aaline(screen, thisLineColor, (x1, y1), (x2, y2))
 
-					# update the prevPt idx
-					prev_ptIdx = ptIdx
+						# update the prevPt idx
+						prev_ptIdx = ptIdx
 
 
-				### CIRCLES
-				cx = int(xPts[ptIdx] * size[0]) + xOffset
-				cy = int(yPts[ptIdx] * size[1]) + yOffset
-				alpha = (i * 255/len(pt_indices))
-				thisDotColor = dotColor + (alpha,)
-				if ptIdx == pt_indices.max():
-					r = 12
-				else:
-					r = 6
-				pygame.gfxdraw.filled_circle(screen, cx, cy, r, thisDotColor)
+					### CIRCLES
+					cx = int(xPts[ptIdx] * size[0]) + xOffset
+					cy = int(yPts[ptIdx] * size[1]) + yOffset
+					
+					if allGaze:
+						# only draw current gaze pt circle, if showing all gaze pts
+						if ptIdx == pt_indices.max():
+							r = 36
+							thisDotColor = (0, 99, 99)
+							pygame.gfxdraw.filled_circle(screen, cx, cy, r, thisDotColor)
+					
+					else:
+						# otherwise, draw circles and set transparency
+						if allGaze:
+							thisDotColor = dotColor
+						else:
+							alpha = (i * 255/len(pt_indices))
+							thisDotColor = dotColor + (alpha,)
+						
+						if ptIdx == pt_indices.max():
+							r = 36
+							thisDotColor = (0, 99, 99)
+						else:
+							r = 12
+						pygame.gfxdraw.filled_circle(screen, cx, cy, r, thisDotColor)
 
 		# update the screen
 		pygame.display.flip()
@@ -236,15 +284,33 @@ if __name__ == '__main__':
 					else:
 						showBG = True
 
-				# toggle hm on/off
-				if event.key == pygame.K_h:
+				# toggle gaze pts on/off with g key
+				elif event.key == pygame.K_g:
+					if showGaze:
+						showGaze = False
+					else:
+						showGaze = True
+
+				# toggle gaze pts all vs. trace with t key
+				elif event.key == pygame.K_t:
+					if allGaze:
+						allGaze = False
+					else:
+						allGaze = True
+
+				# toggle hm on/off with h key
+				elif event.key == pygame.K_h:
 					if showHM:
 						showHM = False
 					else:
 						showHM = True
 
+				# reset all datapts
+				elif event.key == pygame.K_r:
+					nPts.value = 0
+
 				# manual calibration with arrow keys
-				if event.key == pygame.K_UP:
+				elif event.key == pygame.K_UP:
 					yOffset -= 5
 				elif event.key == pygame.K_DOWN:
 					yOffset += 5

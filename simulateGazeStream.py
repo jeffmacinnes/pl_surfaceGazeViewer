@@ -39,6 +39,18 @@ def create_rep_socket(rep_port, data_port):
 			print('sending data port: {}'.format(data_port))
 			rep_socket.send_string(str(data_port))
 
+def switchPosition(curPosition):
+	x1 = .25
+	x2 = .75
+
+	if curPosition == x1:
+		newPosition = x2
+	elif curPosition == x2:
+		newPosition = x1
+
+	return newPosition
+
+
 
 if __name__ == '__main__':
 	
@@ -53,14 +65,23 @@ if __name__ == '__main__':
 	p.start()
 
 	# gaze parameters
+	x1 = .25
+	x2 = .75
 	m = .5
 	std = .05
 
 	# start data streaming
+	startTime = time.time()
 	while True:
 		
 		# create datapoint
-		thisX = np.random.normal(m, std)
+		#curTime = time.time() - startTime
+		#print(curTime)
+		if int(time.time()-startTime) % 2 == 0:
+			Xm = x2
+		else:
+			Xm = x1
+		thisX = np.random.normal(Xm, std)
 		thisY = np.random.normal(m, std)
 
 		# format message
