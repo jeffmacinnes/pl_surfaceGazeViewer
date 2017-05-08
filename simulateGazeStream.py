@@ -5,7 +5,12 @@ One socket will be listening for incoming requests. When it receives a request f
 it will return the port number assigned to the data streaming port. 
 
 The other socket will be continually streaming data formatted in a way to match how pupil capture
-streams gaze data that has been mapped to a defined surface in the scene
+streams gaze data that has been mapped to a defined surface in the scene. These mapped points are expressed
+as x and y locations normalized with respect to the width and height of the surface. 
+
+For this simulation, the "normalized" gaze points are randomly drawn from a normal distribution with a mean
+of .5 (for y), and either .25 or .75 (for x; alternates every few seconds). So in effect, the points streamed will
+be shown as two clusters of locations that alternate back and forth across the image. 
 """
 
 import os, sys

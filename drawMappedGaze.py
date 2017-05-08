@@ -19,158 +19,54 @@ import pygame.gfxdraw
 import sys
 import zmq
 import cv2
+import argparse
 import numpy as np 
 import msgpack as serializer
 from multiprocessing import Process, Array, Value
 import time
 
 
-def dataReceiver(host, port, nPts, xPts, yPts):
+def launchViewer(host, port, refImg):
 	"""
-	receive data over socket, store in Arrays
-	"""
-	# set up socket
-	context = zmq.Context()
-	
-	# send request to get the specific port number for this data
-	requester = context.socket(zmq.REQ)
-	requester.connect('tcp://%s:%s' %(host, port))
-	requester.send_string('SUB_PORT')
-	sub_port = requester.recv_string()
-	print('received sub port:' + sub_port)
-
-	# now open a new socket on this subport
-	sub_socket = context.socket(zmq.SUB)
-	sub_socket.connect('tcp://%s:%s' % (host, sub_port))
-
-	# filter topics
-	try:
-		sub_socket.setsockopt(zmq.SUBSCRIBE, 'surface')
-	except TypeError:
-		sub_socket.setsockopt_string(zmq.SUBSCRIBE, 'surface')
-
-	while True:
-		topic, msg = sub_socket.recv_multipart()
-		message = serializer.loads(msg)
-
-		try:
-			for gaze in message[b'gaze_on_srf']:
-				#print(gaze[b'norm_pos'])
-				xPts[nPts.value] = gaze[b'norm_pos'][0]
-				yPts[nPts.value] = 1 - gaze[b'norm_pos'][1]		# invert (incoming coords have origin bottom left)
-				nPts.value += 1
-		except:
-			pass
-
-
-
-def createHeatmap(xArr, yArr, xOffset, yOffset):
-	"""
-	create a heatmap based on the supplied x & y pts
-	return a numpy array that can be converted to a surface and shown on the screen
+	Main program
+	Start listening for incoming data, show viewer in local window
 	"""
 	
-	# calculate the number of bins in each direction
-	aspect_ratio = h/w
-	bins_w = 25
-	bins_h = int(bins_w * aspect_ratio)
+	# flags for what to show
+	showBG = True		# background image toggle
+	showGaze = True		# gaze pts toggle
+	showHM = False		# heatmap toggle
+	allGaze = False		# show all gaze toggle (vs. gaze trace)
+	gazeTrace = 100 	# number of pts in gaze trace
 
-	# convert the x/y data to be percentages of the bin ranges
-	xArr = (xArr * bins_w)
-	yArr = (yArr * bins_h)
-
-	# add in any manual x/y offset. 
-	# this offset is currenly a function of screen w/h, needs to be bins w/h
-	xOffset_bins = (xOffset/w) * bins_w
-	yOffset_bins = (yOffset/h) * bins_h
-	xArr = xArr + xOffset_bins
-	yArr = yArr + yOffset_bins
-
-	# make 2d histogram
-	hist, xedges, yedges = np.histogram2d(xArr, yArr, 
-								bins=(bins_w, bins_h),
-								range=[[0,bins_w], [0, bins_h]],
-								normed=False)
-
-
-	# smooth the histogram
-	hm_detail = .5
-	filter_size = int(int(hm_detail * bins_w)/2)*2 + 1
-	std_dev = int(filter_size/6.)
-	hist = cv2.GaussianBlur(hist, (filter_size, filter_size), std_dev)
-
-	# normalize to 0-255
-	maxval = np.amax(hist)
-	scale = 255./maxval
-	hist = np.uint8(hist*(scale))
-
-	# threshold histogram
-	hist[hist < 55] = 0
-
-	# apply cv2 colormap to the histogram
-	c_map = cv2.applyColorMap(hist, cv2.COLORMAP_COOL)
-
-	# resize to match the full width and height of the image
-	c_map = cv2.resize(c_map, (h,w))
-
-	# convert the color to RGB from BGR
-	c_map = cv2.cvtColor(c_map, cv2.COLOR_BGR2RGB)
-
-	# create the np array that will store the heatmap
-	heatmap = np.ones((w,h,4), dtype=np.uint8)
-	heatmap[:,:,:3] = c_map
-	heatmap[:,:, 3] = 120  # set transparency
-
-	# get the color of the lowest values (in order to make transparent)
-	zeroIdx = np.where(hist == 0)
-	zeroColor = heatmap[zeroIdx[0][0], zeroIdx[1][0], :3].astype(int)
-
-	return heatmap, zeroColor
-
-
-# Network Settings
-host = '127.0.0.1'
-#host = '10.188.90.175'
-port = '50020'
-
-#### pygame setup #######################
-pygame.init()
-bgImg = pygame.image.load("refImgs/testSkull.jpg")
-w = bgImg.get_width()
-h = bgImg.get_height()
-size = w,h
-
-pygame.display.list_modes()
-info = pygame.display.Info()
-screen = pygame.display.set_mode(size)	# window
-#screen = pygame.display.set_mode(size, pygame.FULLSCREEN) 	# full screen
-
-dotColor = (254,91,161)
-lineColor = (0, 0, 0)
-
-showBG = True		# background image toggle
-showGaze = True		# gaze pts toggle
-showHM = False		# heatmap toggle
-allGaze = False		# show all gaze toggle (vs. gaze trace)
-gazeTrace = 10 	# number of pts in gaze trace
-
-### gaze settings
-xOffset = 0
-yOffset = 0
-
-if __name__ == '__main__':
-
-	# shared vars across processes
+	# gaze settings
 	xPts = Array('f', np.zeros(10000))
 	yPts = Array('f', np.zeros(10000))
 	nPts = Value('i', 0)
+	xOffset = 0
+	yOffset = 0
+	
+	dotColor = (254,91,161)
+	lineColor = (0, 0, 0)
+
+	# pygame setup
+	pygame.init()
+	bgImg = pygame.image.load(refImg)
+	w = bgImg.get_width()
+	h = bgImg.get_height()
+	size = w,h
+
+	pygame.display.list_modes()
+	info = pygame.display.Info()
+	screen = pygame.display.set_mode(size)	# window
+
 
 	# start socket listening in the background
 	p = Process(target=dataReceiver, args=(host, port, nPts, xPts, yPts))
 	p.daemon = True
 	p.start()
 
-
+	# Viewer Loop
 	running = True
 	while running:
 		### set up screen elements
@@ -198,7 +94,7 @@ if __name__ == '__main__':
 
 				# create heatmap array
 				try:
-					hm_array, low_color = createHeatmap(xArr, yArr, xOffset, yOffset)
+					hm_array, low_color = createHeatmap(size, xArr, yArr, xOffset, yOffset)
 					keyColor = pygame.Color(low_color[0], low_color[1], low_color[2], int(255))
 
 					# turn into a pygame surface and display
@@ -242,6 +138,8 @@ if __name__ == '__main__':
 					### CIRCLES
 					cx = int(xPts[ptIdx] * size[0]) + xOffset
 					cy = int(yPts[ptIdx] * size[1]) + yOffset
+					if abs(cx) > 20000: cx = 20000
+					if abs(cy) > 20000: cy = 20000
 					
 					if allGaze:
 						# only draw current gaze pt circle, if showing all gaze pts
@@ -259,11 +157,12 @@ if __name__ == '__main__':
 							thisDotColor = dotColor + (alpha,)
 						
 						if ptIdx == pt_indices.max():
-							r = 36
+							r = 24
 							thisDotColor = (0, 99, 99)
 						else:
 							r = 12
 						pygame.gfxdraw.filled_circle(screen, cx, cy, r, thisDotColor)
+
 
 		# update the screen
 		pygame.display.flip()
@@ -323,7 +222,130 @@ if __name__ == '__main__':
 				if event.key == pygame.K_q:
 					running = False
 					pygame.quit()
-					sys.exist()
+					sys.exit()
+
+
+
+def dataReceiver(host, port, nPts, xPts, yPts):
+	"""
+	receive data over socket, store in Arrays
+	"""
+	# set up socket
+	context = zmq.Context()
+	
+	# send request to get the specific port number for this data
+	requester = context.socket(zmq.REQ)
+	requester.connect('tcp://%s:%s' %(host, port))
+	requester.send_string('SUB_PORT')
+	sub_port = requester.recv_string()
+	print('received sub port:' + sub_port)
+
+	# now open a new socket on this subport
+	sub_socket = context.socket(zmq.SUB)
+	sub_socket.connect('tcp://%s:%s' % (host, sub_port))
+
+	# filter topics
+	try:
+		sub_socket.setsockopt(zmq.SUBSCRIBE, 'surface')
+	except TypeError:
+		sub_socket.setsockopt_string(zmq.SUBSCRIBE, 'surface')
+
+	while True:
+		topic, msg = sub_socket.recv_multipart()
+		message = serializer.loads(msg)
+		try:
+			for gaze in message[b'gaze_on_srf']:
+				#print(gaze[b'norm_pos'])
+				thisX = gaze[b'norm_pos'][0]
+				thisY = 1 - gaze[b'norm_pos'][1]
+				if (thisX < 0) or (thisX > 1.5): thisX = 1.4
+				if (thisY < 0) or (thisY > 1.5): thisY = 1.4
+				xPts[nPts.value] = thisX
+				yPts[nPts.value] = thisY		# invert (incoming coords have origin bottom left)
+				nPts.value += 1
+		except:
+			pass
+
+
+
+def createHeatmap(size, xArr, yArr, xOffset, yOffset):
+	"""
+	create a heatmap based on the supplied x & y pts
+	return a numpy array that can be converted to a pygame surface and shown on the screen
+	"""
+	
+	# calculate the number of bins in each direction
+	w,h = size
+	aspect_ratio = h/w
+	bins_w = 25
+	bins_h = int(bins_w * aspect_ratio)
+
+	# convert the x/y data to be percentages of the bin ranges
+	xArr = (xArr * bins_w)
+	yArr = (yArr * bins_h)
+
+	# add in any manual x/y offset. 
+	# this offset is currenly a function of screen w/h, needs to be bins w/h
+	xOffset_bins = (xOffset/w) * bins_w
+	yOffset_bins = (yOffset/h) * bins_h
+	xArr = xArr + xOffset_bins
+	yArr = yArr + yOffset_bins
+
+	# make 2d histogram
+	hist, xedges, yedges = np.histogram2d(xArr, yArr, 
+								bins=(bins_w, bins_h),
+								range=[[0,bins_w], [0, bins_h]],
+								normed=False)
+
+	# smooth the histogram
+	hm_detail = .5
+	filter_size = int(int(hm_detail * bins_w)/2)*2 + 1
+	std_dev = int(filter_size/6.)
+	hist = cv2.GaussianBlur(hist, (filter_size, filter_size), std_dev)
+
+	# normalize to 0-255
+	maxval = np.amax(hist)
+	scale = 255./maxval
+	hist = np.uint8(hist*(scale))
+
+	# threshold histogram
+	hist[hist < 55] = 0
+
+	# apply cv2 colormap to the histogram
+	c_map = cv2.applyColorMap(hist, cv2.COLORMAP_COOL)
+
+	# resize to match the full width and height of the image
+	c_map = cv2.resize(c_map, (h,w))
+
+	# convert the color to RGB from BGR
+	c_map = cv2.cvtColor(c_map, cv2.COLOR_BGR2RGB)
+
+	# create the np array that will store the heatmap
+	heatmap = np.ones((w,h,4), dtype=np.uint8)
+	heatmap[:,:,:3] = c_map
+	heatmap[:,:, 3] = 120  # set transparency
+
+	# get the color of the lowest values (in order to make transparent)
+	zeroIdx = np.where(hist == 0)
+	zeroColor = heatmap[zeroIdx[0][0], zeroIdx[1][0], :3].astype(int)
+
+	return heatmap, zeroColor
+
+
+if __name__ == '__main__':
+	# parse arguments
+	parser = argparse.ArgumentParser()
+	parser.add_argument('host', help='Host IP (eye data will be sent from this address)')
+	parser.add_argument('port', help='Port Number (port number to connect over)')
+	parser.add_argument('refImg', help='Path to reference image you want to overlay gaze onto')
+	args = parser.parse_args()
+
+	launchViewer(args.host, args.port, args.refImg) 
+
+
+
+
+					
 
 
 
