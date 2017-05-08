@@ -1,4 +1,4 @@
-#Surface Gaze Viewer
+# Surface Gaze Viewer
 
 Tool for live visualization of streaming gaze data using [Pupil Labs](http://www.pupil-labs.com) wearable eye-tracker. Gaze points that have been mapped to a surface (e.g. identified using fiducial markers) in the environment are streamed to a remote connection and overlaid onto a static reference image in real-time. 
 
